@@ -16,15 +16,15 @@ use euclid::{
         virtual_balance::{ExecuteMint, ExecuteMsg as VirtualBalanceMsg, ExecuteTransfer},
     },
     pool::EscrowCreationResponse,
-    swap::WithdrawResponse,
+    swap::{TransferResponse, WithdrawResponse},
     token::{PairWithDenom, PairWithDenomAndAmount, Token},
-    virtual_balance::BalanceKey,
+    virtual_balance::{transfer_virtual_balance, BalanceKey},
 };
 use euclid_ibc::{
     ack::{make_ack_fail, AcknowledgementMsg},
     msg::{
         ChainIbcDepositTokenExecuteMsg, ChainIbcExecuteMsg, ChainIbcRemoveLiquidityExecuteMsg,
-        ChainIbcSwapExecuteMsg,
+        ChainIbcSwapExecuteMsg, ChainIbcTransferExecuteMsg,
     },
 };
 
@@ -187,11 +187,34 @@ pub fn reusable_internal_call(
                     tx_id: msg.tx_id,
                 }))?))
         }
+        ChainIbcExecuteMsg::Transfer(msg) => {
+            ibc_execute_transfer_virtual_balance(deps.branch(), env, msg)
+            // let release_msg = ExecuteMsg::ReleaseEscrowInternal {
+            //     sender: msg.sender,
+            //     token: msg.token.clone(),
+            //     amount: Some(msg.amount),
+            //     cross_chain_addresses: msg.recipient_addresses,
+            //     timeout: msg.timeout,
+            //     tx_id: msg.tx_id.clone(),
+            // };
+
+            // Ok(Response::new()
+            //     .add_message(CosmosMsg::Wasm(WasmMsg::Execute {
+            //         contract_addr: env.contract.address.to_string(),
+            //         msg: to_json_binary(&release_msg)?,
+            //         funds: vec![],
+            //     }))
+            //     .set_data(to_json_binary(&AcknowledgementMsg::Ok(TransferResponse {
+            //         token: msg.token,
+            //         tx_id: msg.tx_id,
+            //     }))?))
+        }
         ChainIbcExecuteMsg::DepositToken(msg) => {
             ensure!(
                 msg.sender.chain_uid == chain_uid,
                 ContractError::new("Chain UID mismatch")
             );
+
             ibc_execute_deposit_token(deps.branch(), env, msg)
         }
     }
@@ -710,4 +733,38 @@ fn ibc_execute_deposit_token(
             .add_attribute("tx_id", msg.tx_id.clone()),
         )
         .set_data(to_json_binary(&ack)?))
+}
+
+fn ibc_execute_transfer_virtual_balance(
+    deps: DepsMut,
+    _env: Env,
+    msg: ChainIbcTransferExecuteMsg,
+) -> Result<Response, ContractError> {
+    let virtual_balance_address = STATE
+        .load(deps.storage)?
+        .virtual_balance_address
+        .map_or(Err(ContractError::EmptyVirtualBalanceAddress {}), Ok)?
+        .into_string();
+
+    let res = transfer_virtual_balance(
+        msg.sender.clone(),
+        msg.token.clone(),
+        msg.amount,
+        msg.recipient_address,
+        virtual_balance_address,
+    )?;
+
+    Ok(res
+        .add_event(
+            tx_event(
+                &msg.tx_id,
+                &msg.sender.to_sender_string(),
+                TxType::TransferVirtualBalance,
+            )
+            .add_attribute("tx_id", msg.tx_id.clone()),
+        )
+        .set_data(to_json_binary(&AcknowledgementMsg::Ok(TransferResponse {
+            token: msg.token,
+            tx_id: msg.tx_id,
+        }))?))
 }

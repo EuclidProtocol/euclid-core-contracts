@@ -322,7 +322,7 @@ pub fn execute_release_escrow(
     while !remaining_withdraw_amount.is_zero() && cross_chain_addresses_iterator.peek().is_some() {
         let cross_chain_address = cross_chain_addresses_iterator
             .next()
-            .ok_or(ContractError::new("Cross Chain Address Iter Faiiled"))?;
+            .ok_or(ContractError::new("Cross Chain Address Iter Failed"))?;
         let chain =
             CHAIN_UID_TO_CHAIN.load(deps.storage, cross_chain_address.user.chain_uid.clone())?;
 
@@ -400,6 +400,31 @@ pub fn execute_release_escrow(
         .add_attribute("release_expected", amount)
         .add_attribute("actual_released", transfer_amount)
         .add_submessages(release_msgs))
+}
+
+pub fn execute_transfer_voucher_internal(
+    _deps: &mut DepsMut,
+    env: Env,
+    _info: MessageInfo,
+    token: Token,
+    recipient: CrossChainUser,
+    amount: Option<Uint128>,
+    timeout: Option<u64>,
+) -> Result<Response, ContractError> {
+    let msg = CosmosMsg::Wasm(WasmMsg::Execute {
+        contract_addr: env.contract.address.to_string(),
+        msg: to_json_binary(&ExecuteMsg::TransferVirtualBalance {
+            recipient,
+            token,
+            amount,
+            timeout,
+        })?,
+        funds: vec![],
+    });
+
+    Ok(Response::new()
+        .add_message(msg)
+        .add_attribute("method", "transfer_voucher"))
 }
 
 pub fn execute_native_receive_callback(
